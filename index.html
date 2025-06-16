@@ -7,9 +7,141 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="style.css" />
+  <script src="glider.min.js" defer></script>
 </head>
 <body>
-  <h1>Vuurcamping Admin</h1>
-  <p>Hier komt het volledige admin-dashboard.</p>
+  <h1>Vuurcamping – Admin</h1>
+  <form id="campingForm">
+    <label>Naam:<input type="text" id="naam" required /></label>
+    <label>Provincie:<input type="text" id="provincie" /></label>
+    <div class="autocomplete-container">
+      <label>Adres:<input type="text" id="adres" autocomplete="off" /></label>
+      <div id="suggestions"></div>
+    </div>
+    <label>Latitude:<input type="number" step="0.000001" id="lat" /></label>
+    <label>Longitude:<input type="number" step="0.000001" id="lng" /></label>
+    <div id="mapPreview"></div>
+    <label>Website:<input type="url" id="website" /></label>
+    <label>Telefoon:<input type="text" id="telefoon" /></label>
+    <label>Info:<textarea id="info"></textarea></label>
+    <label>Kampvuurtype:
+      <select id="kenmerk">
+        <option value="vuur bij eigen tent">Vuur bij eigen tent</option>
+        <option value="gezamenlijke vuurplaats">Gezamenlijke vuurplaats</option>
+        <option value="dagelijks vuur door campingmedewerkers">Dagelijks vuur door campingmedewerkers</option>
+      </select>
+    </label>
+    <label>Logo-URL:<input type="url" id="logo_url" /></label>
+    <label>Voorzieningen (komma's):<input type="text" id="voorzieningen" /></label>
+    <label>Afbeelding uploaden:<input type="file" id="foto_upload" /></label>
+    <button type="submit">Camping toevoegen</button>
+  </form>
+
+  <script>
+    let map;
+    let marker;
+    const mapboxToken = 'pk.eyJ1IjoicGllZGllODMiLCJhIjoiY21ieTgwZGc4MWlvNzJqczM4aWx0Mm5sNiJ9.PQPGz6DxCQ2Ac22w46FSDQ';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      initMap();
+      const supabase = supabase.createClient(
+        'https://vkmhpepihunmsjvdibqw.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZrbWhwZXBpaHVubXNqdmRpYnF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMjI1ODksImV4cCI6MjA2NTU5ODU4OX0.ajEJBw_YlpWCH8JRpsyY08X8RyEkLmfCrJLmJMeOQh4'
+      );
+
+      document.getElementById('campingForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const camping = {
+          naam: document.getElementById('naam').value,
+          provincie: document.getElementById('provincie').value,
+          adres: document.getElementById('adres').value,
+          lat: parseFloat(document.getElementById('lat').value),
+          lng: parseFloat(document.getElementById('lng').value),
+          website: document.getElementById('website').value,
+          telefoon: document.getElementById('telefoon').value,
+          info: document.getElementById('info').value,
+          kenmerk: document.getElementById('kenmerk').value,
+          logo_url: document.getElementById('logo_url').value,
+          voorzieningen: document.getElementById('voorzieningen').value
+        };
+
+        const { error } = await supabase.from('campings').insert([camping]);
+        if (error) {
+          alert('Fout bij opslaan: ' + error.message);
+        } else {
+          alert('Camping toegevoegd!');
+          document.getElementById('campingForm').reset();
+        }
+      });
+
+      const adresInput = document.getElementById('adres');
+      const suggestions = document.getElementById('suggestions');
+
+      adresInput.addEventListener('input', async () => {
+        const query = adresInput.value;
+        if (!query) return suggestions.innerHTML = '';
+        try {
+          const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&autocomplete=true&country=NL&types=place,address`);
+          if (!res.ok) throw new Error('Netwerkfout: ' + res.status);
+          const data = await res.json();
+          suggestions.innerHTML = '';
+
+          if (!data.features || data.features.length === 0) {
+            suggestions.innerHTML = '<div class="suggestion-item">Geen suggesties</div>';
+            return;
+          }
+
+          data.features.forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'suggestion-item';
+            div.textContent = f.place_name;
+            div.addEventListener('click', () => {
+              adresInput.value = f.place_name;
+              const [lng, lat] = f.geometry.coordinates;
+              document.getElementById('lat').value = lat;
+              document.getElementById('lng').value = lng;
+              updateMap(lat, lng);
+              const provincie = f.context?.find(c => c.id.startsWith('region'))?.text || '';
+              document.getElementById('provincie').value = provincie;
+              suggestions.innerHTML = '';
+            });
+            suggestions.appendChild(div);
+          });
+        } catch (error) {
+          suggestions.innerHTML = '<div class="suggestion-item">Fout bij laden suggesties</div>';
+        }
+      });
+    });
+
+    function initMap() {
+      if (typeof L === 'undefined') {
+        alert('Leaflet is niet geladen!');
+        return;
+      }
+      map = L.map('mapPreview').setView([52.1, 5.2], 6);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      map.on('click', function (e) {
+        const { lat, lng } = e.latlng;
+        document.getElementById('lat').value = lat.toFixed(6);
+        document.getElementById('lng').value = lng.toFixed(6);
+        updateMap(lat, lng);
+      });
+    }
+
+    function updateMap(lat, lng) {
+      if (!map) return;
+      map.setView([lat, lng], 10);
+      if (marker) {
+        marker.setLatLng([lat, lng]);
+      } else {
+        marker = L.marker([lat, lng]).addTo(map);
+      }
+    }
+  </script>
 </body>
 </html>
